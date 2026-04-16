@@ -81,13 +81,15 @@ BQ_EXTERNAL_ID_COL = "extracted_CR_number"
 BQ_FIELD1_COL = "revenue"
 BQ_FIELD2_COL = "spend"
 BQ_FIELD3_COL = "roas"
-BQ_FIELD4_COL = "first_date"  # NEW
+BQ_FIELD4_COL = "first_date"
+BQ_FIELD5_COL = "poas"
 
 AT_EXTERNAL_ID = "Creative ID"
 AT_FIELD1 = "revenue"
 AT_FIELD2 = "spend"
 AT_FIELD3 = "roas"
-AT_FIELD4 = "first_date"  # NEW
+AT_FIELD4 = "first_date"
+AT_FIELD5 = "poas"
 
 # === SECRETS ===
 # Either set via env var (export AIRTABLE_API_KEY="pat_...") or fetch from Secret Manager
@@ -165,7 +167,8 @@ def fetch_bq_rows(company: str = "Snocks") -> List[Dict[str, Any]]:
       {BQ_FIELD1_COL} AS f1,
       {BQ_FIELD2_COL} AS f2,
       {BQ_FIELD3_COL} AS f3,
-      FORMAT_TIMESTAMP('%Y-%m-%dT%H:%M:%E3SZ', CAST({BQ_FIELD4_COL} AS TIMESTAMP)) AS f4
+      FORMAT_TIMESTAMP('%Y-%m-%dT%H:%M:%E3SZ', CAST({BQ_FIELD4_COL} AS TIMESTAMP)) AS f4,
+      {BQ_FIELD5_COL} AS f5
     FROM `{GCP_PROJECT_ID}.{BQ_DATASET}.{BQ_TABLE}`
     WHERE company = @company
     """
@@ -183,13 +186,14 @@ def fetch_bq_rows(company: str = "Snocks") -> List[Dict[str, Any]]:
             "f2": r.get("f2"),
             "f3": r.get("f3"),
             "f4": r.get("f4"),
+            "f5": r.get("f5"),
         })
     return rows
 
 def fetch_airtable_index(company: str, api_key: str) -> Dict[str, Dict[str, Any]]:
     """Fetch all rows from Airtable and index them by the external id.
 
-    Returns a mapping `{external_id: {rid, f1, f2, f3, f4}}` for quick lookup.
+    Returns a mapping `{external_id: {rid, f1, f2, f3, f4, f5}}` for quick lookup.
     """
     url = _airtable_url(company)
     headers = _airtable_headers(api_key)
@@ -199,7 +203,7 @@ def fetch_airtable_index(company: str, api_key: str) -> Dict[str, Dict[str, Any]
     while True:
         params: Dict[str, Any] = {
             "pageSize": 50,
-            "fields[]": [AT_EXTERNAL_ID, AT_FIELD1, AT_FIELD2, AT_FIELD3, AT_FIELD4],
+            "fields[]": [AT_EXTERNAL_ID, AT_FIELD1, AT_FIELD2, AT_FIELD3, AT_FIELD4, AT_FIELD5],
         }
         if offset:
             params["offset"] = offset
@@ -229,6 +233,7 @@ def fetch_airtable_index(company: str, api_key: str) -> Dict[str, Dict[str, Any]
                     "f2": f.get(AT_FIELD2),
                     "f3": f.get(AT_FIELD3),
                     "f4": f.get(AT_FIELD4),
+                    "f5": f.get(AT_FIELD5),
                 }
 
         offset = data.get("offset")
@@ -283,6 +288,7 @@ def build_fields_payload(row: Dict[str, Any]) -> Dict[str, Any]:
         AT_FIELD2: _sanitize_for_airtable(row.get("f2")),
         AT_FIELD3: _sanitize_for_airtable(row.get("f3")),
         AT_FIELD4: _sanitize_for_airtable(row.get("f4")),
+        AT_FIELD5: _sanitize_for_airtable(row.get("f5")),
     }
 
 
@@ -404,13 +410,15 @@ def run_sync(company: str) -> Dict[str, int]:
                 payload_fields.get(AT_FIELD2),
                 payload_fields.get(AT_FIELD3),
                 payload_fields.get(AT_FIELD4),
+                payload_fields.get(AT_FIELD5),
             )
             f1 = cur.get("f1") or 0.0
             f2 = cur.get("f2") or 0.0
             f3 = cur.get("f3") or 0.0
             f4 = cur.get("f4")
+            f5 = cur.get("f5")
 
-            current_tuple = (f1, f2, f3, f4)
+            current_tuple = (f1, f2, f3, f4, f5)
             if current_tuple != desired_tuple:
                 log.info("Update planned for %s", ext)
                 _merge_update(updates_by_id, cur["rid"], payload_fields)
@@ -427,7 +435,7 @@ def run_sync(company: str) -> Dict[str, int]:
 
         if bq_row is None:
             # external_id existiert in Airtable, aber nicht mehr in BQ → alle Werte leeren
-            if any(v is not None for v in (rec.get("f1"), rec.get("f2"), rec.get("f3"), rec.get("f4"))):
+            if any(v is not None for v in (rec.get("f1"), rec.get("f2"), rec.get("f3"), rec.get("f4"), rec.get("f5"))):
                 log.info("Clear fields (no longer in BQ) for %s", ext)
                 _merge_update(
                     updates_by_id,
@@ -437,6 +445,7 @@ def run_sync(company: str) -> Dict[str, int]:
                         AT_FIELD2: None,
                         AT_FIELD3: None,
                         AT_FIELD4: None,
+                        AT_FIELD5: None,
                     },
                 )
             # >>> Debug-Tracking
@@ -458,6 +467,8 @@ def run_sync(company: str) -> Dict[str, int]:
             to_clear[AT_FIELD3] = 0.0
         if bq_row.get("f4") is None and rec.get("f4") is not None:
             to_clear[AT_FIELD4] = None
+        if bq_row.get("f5") is None and rec.get("f5") is not None:
+            to_clear[AT_FIELD5] = 0.0
 
         if to_clear:
             log.info("Clear partial fields for %s: %s", ext, ", ".join(to_clear.keys()))
