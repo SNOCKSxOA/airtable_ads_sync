@@ -70,7 +70,11 @@ AIRTABLE_BASE_OA_DEV = "apprHKYwMV8JWxeYk"
 AIRTABLE_BASE_SNOCKS = "appSC6U99N8701HKf"  
 AIRTABLE_TABLE_SNOCKS = "tblkAk6Q9ZgG9LyTz"  
 AIRTABLE_BASE_OA = "app0N8ejLt45NY0Hg"  
-AIRTABLE_TABLE_OA = "tblkAk6Q9ZgG9LyTz"  
+AIRTABLE_TABLE_OA = "tblkAk6Q9ZgG9LyTz"
+
+# Les Lunes (Leslunes) — production base; `company` in BQ is lowercase `leslunes`
+AIRTABLE_BASE_LESLUNES = "appUqN503Qs24duGz"
+AIRTABLE_TABLE_LESLUNES = "tblkAk6Q9ZgG9LyTz"
 
 # Field mapping: BigQuery -> Airtable
 BQ_EXTERNAL_ID_COL = "extracted_CR_number"
@@ -107,7 +111,11 @@ def _airtable_headers(api_key: str) -> Dict[str, str]:
     }
 
 
-essential_tables = {"Snocks": (AIRTABLE_BASE_SNOCKS, AIRTABLE_TABLE_SNOCKS), "OA": (AIRTABLE_BASE_OA, AIRTABLE_TABLE_OA)}
+essential_tables = {
+    "Snocks": (AIRTABLE_BASE_SNOCKS, AIRTABLE_TABLE_SNOCKS),
+    "OA": (AIRTABLE_BASE_OA, AIRTABLE_TABLE_OA),
+    "Leslunes": (AIRTABLE_BASE_LESLUNES, AIRTABLE_TABLE_LESLUNES),
+}
 
 
 def _airtable_url(company: str) -> str:
@@ -117,13 +125,18 @@ def _airtable_url(company: str) -> str:
     return f"https://api.airtable.com/v0/{AIRTABLE_BASE}/{AIRTABLE_TABLE}"
 
 def _normalize_company_label(label: str) -> str:
-    """Return canonical label used in this script: 'Snocks' or 'OA'."""
-    c = (label or "").strip().lower()
+    """Return canonical label: 'Snocks', 'OA', or 'Leslunes'.
+
+    Accepts common aliases (spaces/underscores stripped, case-insensitive).
+    """
+    c = (label or "").strip().lower().replace(" ", "").replace("_", "")
     if c in ("snocks",):
         return "Snocks"
     if c in ("oa", "oceansapart"):
         return "OA"
-    raise ValueError("company must be 'Snocks' or 'OA'")
+    if c == "leslunes":
+        return "Leslunes"
+    raise ValueError("company must be 'Snocks', 'OA', or 'Leslunes' (aliases: leslunes, les lunes, …)")
 
 def _bq_company_value(company_label: str) -> str:
     """Return the value used in BigQuery's 'company' column for a given label."""
@@ -131,6 +144,8 @@ def _bq_company_value(company_label: str) -> str:
         return "Oceansapart"   # <-- OA steht für Oceansapart
     if company_label == "Snocks":
         return "snocks"         # <-- so steht es in deiner Query/Tabelle
+    if company_label == "Leslunes":
+        return "leslunes"
     raise ValueError("Unsupported company label")
 
 
@@ -338,7 +353,7 @@ def write_updates(company: str, api_key: str, records: List[Dict[str, Any]]):
 
 def run_sync(company: str) -> Dict[str, int]:
     
-    """Run a sync for the given company label ('Snocks' or 'OA')."""
+    """Run a sync for the given company label ('Snocks', 'OA', or 'Leslunes')."""
     company = _normalize_company_label(company)  # <-- NEW (zentrale Normalisierung)
 
     api_key = get_credentials_from_secret_manager(AIRTABLE_SECRET_NAME)
@@ -495,7 +510,7 @@ def my_function(request):
     log.info("🚀 Sync started.")
     results = {}
     status = 200
-    for company in ("Snocks", "OA"):
+    for company in ("Snocks", "OA", "Leslunes"):
         try:
             results[company] = run_sync(company=company)
         except GatewayTimeout as e:
@@ -518,3 +533,4 @@ def my_function(request):
 if __name__ == "__main__":
     print(run_sync(company="OA"))
     print(run_sync(company="Snocks"))
+    print(run_sync(company="Leslunes"))
